@@ -1,8 +1,9 @@
 use glfw::{Action, Context, Key, Window, fail_on_errors};
-use wgpu::{Backends, Texture, TextureViewDimension};
 
-use crate::pipeline_builder::PipelineBuilder;
-mod pipeline_builder;
+use crate::renderer_backend::mesh_builder;
+use crate::renderer_backend::pipeline_builder::PipelineBuilder;
+mod renderer_backend;
+
 struct State<'a> {
     instance: wgpu::Instance,
     surface: wgpu::Surface<'a>,
@@ -12,6 +13,7 @@ struct State<'a> {
     size: (i32, i32),
     window: &'a mut Window,
     render_pipeline: wgpu::RenderPipeline,
+    triangle_mesh: wgpu::Buffer,
 }
 
 impl<'a> State<'a> {
@@ -29,6 +31,7 @@ impl<'a> State<'a> {
             force_fallback_adapter: false,
         };
 
+        // Set adapter, represents a physical or virtual GPU (graphics device) available on your system.
         let adapter = instance.request_adapter(&adapter_descriptor).await.unwrap();
 
         let device_descriptor = wgpu::DeviceDescriptor {
@@ -39,6 +42,7 @@ impl<'a> State<'a> {
             trace: wgpu::Trace::Off,
         };
 
+        // with the adapter abstaction we get the Device: This is a logical connection to the GPU. and Queue: This is how you send (submit) commands buffers to the GPU for execution.
         let (device, queue) = adapter.request_device(&device_descriptor).await.unwrap();
 
         let surface_capabilities = surface.get_capabilities(&adapter);
@@ -61,11 +65,19 @@ impl<'a> State<'a> {
             desired_maximum_frame_latency: 2,
         };
 
+        // configure drawable surface (the "frame canvas")
         surface.configure(&device, &config);
 
+        // build a mesh (for dummy, a triangle)
+        let triangle_mesh = mesh_builder::make_triangle(&device);
+
+        // build the pipeline, setting the shader module, pixel format and buffer layouts
         let mut pipeline_builder = PipelineBuilder::new();
         pipeline_builder.set_shader_module("shaders/shader.wgsl", "vs_main", "fs_main");
         pipeline_builder.set_pixel_format(config.format);
+
+        // Buffer layouts describe how your vertex data is structured in memory (e.g., position, color, stride, offsets).
+        pipeline_builder.add_buffer_layout(mesh_builder::Vertex::get_layout());
         let render_pipeline = pipeline_builder.build_pipeline(&device);
         Self {
             instance: instance,
@@ -76,6 +88,7 @@ impl<'a> State<'a> {
             size: size,
             window: window,
             render_pipeline: render_pipeline,
+            triangle_mesh: triangle_mesh,
         }
     }
 
@@ -101,9 +114,9 @@ impl<'a> State<'a> {
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: 0.25,
-                    g: 0.0,
-                    b: 0.5,
+                    r: 0.1,
+                    g: 0.1,
+                    b: 0.1,
                     a: 0.0,
                 }),
                 store: wgpu::StoreOp::Store,
@@ -122,6 +135,7 @@ impl<'a> State<'a> {
         {
             let mut render_pass = command_encoder.begin_render_pass(&render_pass_descriptor);
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_vertex_buffer(0, self.triangle_mesh.slice(..));
             render_pass.draw(0..3, 0..1);
         }
 
