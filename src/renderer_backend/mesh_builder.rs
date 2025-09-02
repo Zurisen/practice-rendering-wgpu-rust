@@ -1,10 +1,18 @@
 use glm::*;
-use wgpu::util::DeviceExt;
+use wgpu::{naga::proc::index, util::DeviceExt};
 
 #[repr(C)]
 pub struct Vertex {
     position: Vec3,
     color: Vec3,
+}
+
+/*
+For Index Buffer optimization
+*/
+pub struct Mesh {
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
 }
 
 impl Vertex {
@@ -27,6 +35,7 @@ unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
 }
 
 pub fn make_triangle(device: &wgpu::Device) -> wgpu::Buffer {
+    // Order of vertices matter: by default it uses counter clockwise winding
     let vertices: [Vertex; 3] = [
         Vertex {
             position: Vec3::new(-0.75, -0.75, 0.0),
@@ -53,4 +62,47 @@ pub fn make_triangle(device: &wgpu::Device) -> wgpu::Buffer {
     let buffer = device.create_buffer_init(&buffer_descriptor);
 
     return buffer;
+}
+
+pub fn make_quad(device: &wgpu::Device) -> Mesh {
+    // Use mesh to avoid Vertexes duplicates (quad has one adjacent side- 2 vertices) with the 2 triangles composing it
+    let vertices: [Vertex; 4] = [
+        Vertex {
+            position: Vec3::new(-0.5, -0.5, 0.0),
+            color: Vec3::new(1.0, 0.0, 0.0),
+        },
+        Vertex {
+            position: Vec3::new(0.5, -0.5, 0.0),
+            color: Vec3::new(0.0, 0.0, 1.0),
+        },
+        Vertex {
+            position: Vec3::new(-0.5, 0.5, 0.0),
+            color: Vec3::new(0.0, 1.0, 0.0),
+        },
+        Vertex {
+            position: Vec3::new(0.5, 0.5, 0.0),
+            color: Vec3::new(0.0, 0.0, 1.0),
+        },
+    ];
+    let indices = [0, 1, 2, 2, 1, 3]; // drawing order of each index (counter-clockwise)
+
+    let mut contents_bytes = unsafe { any_as_u8_slice(&vertices) };
+    let mut buffer_descriptor = wgpu::util::BufferInitDescriptor {
+        label: Some("Quad vertex buffer"),
+        contents: contents_bytes,
+        usage: wgpu::BufferUsages::VERTEX,
+    };
+    let vertex_buffer = device.create_buffer_init(&buffer_descriptor);
+
+    contents_bytes = unsafe { any_as_u8_slice(&indices) };
+    buffer_descriptor = wgpu::util::BufferInitDescriptor {
+        label: Some("Quad index buffer"),
+        contents: contents_bytes,
+        usage: wgpu::BufferUsages::INDEX,
+    };
+    let index_buffer = device.create_buffer_init(&buffer_descriptor);
+    return Mesh {
+        vertex_buffer: vertex_buffer,
+        index_buffer: index_buffer,
+    };
 }

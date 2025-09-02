@@ -1,6 +1,6 @@
 use glfw::{Action, Context, Key, Window, fail_on_errors};
 
-use crate::renderer_backend::mesh_builder;
+use crate::renderer_backend::mesh_builder::{self, Mesh};
 use crate::renderer_backend::pipeline_builder::PipelineBuilder;
 mod renderer_backend;
 
@@ -13,7 +13,8 @@ struct State<'a> {
     size: (i32, i32),
     window: &'a mut Window,
     render_pipeline: wgpu::RenderPipeline,
-    triangle_mesh: wgpu::Buffer,
+    //mesh: wgpu::Buffer, // Only if you dont want to use Index buffer optimization
+    mesh: Mesh,
 }
 
 impl<'a> State<'a> {
@@ -68,8 +69,8 @@ impl<'a> State<'a> {
         // configure drawable surface (the "frame canvas")
         surface.configure(&device, &config);
 
-        // build a mesh (for dummy, a triangle)
-        let triangle_mesh = mesh_builder::make_triangle(&device);
+        // build a mesh (for dummy, a quad)
+        let mesh = mesh_builder::make_quad(&device);
 
         // build the pipeline, setting the shader module, pixel format and buffer layouts
         let mut pipeline_builder = PipelineBuilder::new();
@@ -88,7 +89,7 @@ impl<'a> State<'a> {
             size: size,
             window: window,
             render_pipeline: render_pipeline,
-            triangle_mesh: triangle_mesh,
+            mesh: mesh,
         }
     }
 
@@ -135,8 +136,11 @@ impl<'a> State<'a> {
         {
             let mut render_pass = command_encoder.begin_render_pass(&render_pass_descriptor);
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_vertex_buffer(0, self.triangle_mesh.slice(..));
-            render_pass.draw(0..3, 0..1);
+            render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
+            render_pass
+                .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..6, 0, 0..1);
+            //render_pass.draw(0..6, 0..1); // only if not using index optimization
         }
 
         self.queue.submit(std::iter::once(command_encoder.finish()));
