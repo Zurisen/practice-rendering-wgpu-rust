@@ -1,5 +1,8 @@
+use env_logger::builder;
 use glfw::{Action, Context, Key, Window, fail_on_errors};
 
+use crate::renderer_backend::bind_group_layout;
+use crate::renderer_backend::material::Material;
 use crate::renderer_backend::mesh_builder::{self, Mesh};
 use crate::renderer_backend::pipeline_builder::PipelineBuilder;
 mod renderer_backend;
@@ -15,6 +18,7 @@ struct State<'a> {
     render_pipeline: wgpu::RenderPipeline,
     //mesh: wgpu::Buffer, // Only if you dont want to use Index buffer optimization
     mesh: Mesh,
+    material: Material,
 }
 
 impl<'a> State<'a> {
@@ -72,14 +76,33 @@ impl<'a> State<'a> {
         // build a mesh (for dummy, a quad)
         let mesh = mesh_builder::make_quad(&device);
 
+        // build bind group layouts for material textures
+        let material_bind_group_layout: wgpu::BindGroupLayout;
+        {
+            let mut builder = bind_group_layout::Builder::new(&device);
+            builder.add_material();
+            material_bind_group_layout = builder.build("Material Bind Group Layout");
+        }
+
         // build the pipeline, setting the shader module, pixel format and buffer layouts
-        let mut pipeline_builder = PipelineBuilder::new();
-        pipeline_builder.set_shader_module("shaders/shader.wgsl", "vs_main", "fs_main");
-        pipeline_builder.set_pixel_format(config.format);
+        let render_pipeline: wgpu::RenderPipeline;
+        {
+            let mut builder = PipelineBuilder::new(&device);
+            builder.set_shader_module("shaders/shader.wgsl", "vs_main", "fs_main");
+            builder.set_pixel_format(config.format);
+            builder.add_buffer_layout(mesh_builder::Vertex::get_layout());
+            builder.add_bind_group_layout(&material_bind_group_layout);
+            render_pipeline = builder.build_pipeline("Render Pipeline");
+        }
+
+        let quad_material = Material::new(
+            "img/texture1.jpg",
+            &device,
+            &queue,
+            &material_bind_group_layout,
+        );
 
         // Buffer layouts describe how your vertex data is structured in memory (e.g., position, color, stride, offsets).
-        pipeline_builder.add_buffer_layout(mesh_builder::Vertex::get_layout());
-        let render_pipeline = pipeline_builder.build_pipeline(&device);
         Self {
             instance: instance,
             surface: surface,
@@ -90,6 +113,7 @@ impl<'a> State<'a> {
             window: window,
             render_pipeline: render_pipeline,
             mesh: mesh,
+            material: quad_material,
         }
     }
 
@@ -136,6 +160,7 @@ impl<'a> State<'a> {
         {
             let mut render_pass = command_encoder.begin_render_pass(&render_pass_descriptor);
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.material.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
             render_pass
                 .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -196,6 +221,13 @@ async fn run() {
     }
 }
 
+// Bind group layout builder --> Builder struct (bind_group_layout.rs)
+// Pipeline builder takes bind group layout
+// Engine has bind group layout and pipeline uses it
+// Bind group builder --> Builder struct (bind_group.rs)
+// Texture class
+// Engine has textures
+// Shader has textures
 fn main() {
     pollster::block_on(run())
 }
