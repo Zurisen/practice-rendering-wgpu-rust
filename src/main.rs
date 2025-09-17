@@ -1,11 +1,16 @@
 use env_logger::builder;
 use glfw::{Action, Context, Key, Window, fail_on_errors};
+use wgpu::util::DeviceExt;
 
+mod controls;
+mod renderer_backend;
+
+use crate::controls::camera_controller::CameraController;
 use crate::renderer_backend::bind_group_layout;
+use crate::renderer_backend::camera::{Camera, CameraUniform};
 use crate::renderer_backend::material::Material;
 use crate::renderer_backend::mesh_builder::{self, Mesh};
 use crate::renderer_backend::pipeline_builder::PipelineBuilder;
-mod renderer_backend;
 
 struct State<'a> {
     instance: wgpu::Instance,
@@ -16,9 +21,13 @@ struct State<'a> {
     size: (i32, i32),
     window: &'a mut Window,
     render_pipeline: wgpu::RenderPipeline,
-    //mesh: wgpu::Buffer, // Only if you dont want to use Index buffer optimization
     mesh: Mesh,
     material: Material,
+    camera: Camera,
+    camera_buffer: wgpu::Buffer,
+    camera_uniform: CameraUniform,
+    camera_controller: CameraController,
+    camera_bind_group: wgpu::BindGroup,
 }
 
 impl<'a> State<'a> {
@@ -84,6 +93,50 @@ impl<'a> State<'a> {
             material_bind_group_layout = builder.build("Material Bind Group Layout");
         }
 
+        // Camera bind group and bind group layouts creation
+        let camera = Camera {
+            // position the camera 1 unit up and 2 units back
+            // +z is out of the screen
+            eye: (0.0, 1.0, 2.0).into(),
+            // have it look at the origin
+            target: (0.0, 0.0, 0.0).into(),
+            // which way is "up"
+            up: cgmath::Vector3::unit_y(),
+            aspect: config.width as f32 / config.height as f32,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0,
+        };
+        let mut camera_uniform = CameraUniform::new();
+        camera_uniform.update_view_proj(&camera);
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[camera_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("camera_bind_group_layout"),
+            });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+            label: Some("camera_bind_group"),
+        });
+
         // build the pipeline, setting the shader module, pixel format and buffer layouts
         let render_pipeline: wgpu::RenderPipeline;
         {
@@ -92,6 +145,7 @@ impl<'a> State<'a> {
             builder.set_pixel_format(config.format);
             builder.add_buffer_layout(mesh_builder::Vertex::get_layout());
             builder.add_bind_group_layout(&material_bind_group_layout);
+            builder.add_bind_group_layout(&camera_bind_group_layout);
             render_pipeline = builder.build_pipeline("Render Pipeline");
         }
 
@@ -101,6 +155,7 @@ impl<'a> State<'a> {
             &queue,
             &material_bind_group_layout,
         );
+        let camera_controller = CameraController::new(0.05);
 
         // Buffer layouts describe how your vertex data is structured in memory (e.g., position, color, stride, offsets).
         Self {
@@ -114,6 +169,11 @@ impl<'a> State<'a> {
             render_pipeline: render_pipeline,
             mesh: mesh,
             material: quad_material,
+            camera: camera,
+            camera_uniform: camera_uniform,
+            camera_buffer: camera_buffer,
+            camera_controller: camera_controller,
+            camera_bind_group: camera_bind_group,
         }
     }
 
@@ -161,6 +221,7 @@ impl<'a> State<'a> {
             let mut render_pass = command_encoder.begin_render_pass(&render_pass_descriptor);
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.material.bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
             render_pass
                 .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
@@ -182,6 +243,18 @@ impl<'a> State<'a> {
         }
     }
 
+    fn update_camera(&mut self) {
+        // Update camera position based on controller
+        self.camera_controller.update_camera(&mut self.camera);
+
+        // Update the camera uniform and write to GPU
+        self.camera_uniform.update_view_proj(&self.camera);
+        self.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[self.camera_uniform]),
+        );
+    }
     fn update_surface(&mut self) {
         let target = unsafe { wgpu::SurfaceTargetUnsafe::from_window(&self.window) }.unwrap();
 
@@ -207,6 +280,7 @@ async fn run() {
     while !state.window.should_close() {
         glfw.poll_events();
         for (_, event) in glfw::flush_messages(&events) {
+            state.camera_controller.process_events(&event);
             match event {
                 glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => {
                     state.window.set_should_close(true);
@@ -215,6 +289,7 @@ async fn run() {
             }
         }
 
+        state.update_camera();
         state.render();
 
         state.window.swap_buffers();
