@@ -96,7 +96,7 @@ impl<'a> State<'a> {
         }
 
         let quad_material = Material::new(
-            "img/texture1.jpg",
+            "img/texture_diamond.jpg",
             &device,
             &queue,
             &material_bind_group_layout,

@@ -4,7 +4,7 @@ use wgpu::{naga::proc::index, util::DeviceExt};
 #[repr(C)]
 pub struct Vertex {
     position: Vec3,
-    color: Vec3,
+    tex_coord: [f32; 2],
 }
 
 /*
@@ -18,7 +18,7 @@ pub struct Mesh {
 impl Vertex {
     pub fn get_layout() -> wgpu::VertexBufferLayout<'static> {
         const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
-            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
 
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
@@ -34,54 +34,24 @@ unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
     }
 }
 
-pub fn make_triangle(device: &wgpu::Device) -> wgpu::Buffer {
-    // Order of vertices matter: by default it uses counter clockwise winding
-    let vertices: [Vertex; 3] = [
-        Vertex {
-            position: Vec3::new(-0.75, -0.75, 0.0),
-            color: Vec3::new(1.0, 0.0, 0.0),
-        },
-        Vertex {
-            position: Vec3::new(0.75, -0.75, 0.0),
-            color: Vec3::new(0.0, 1.0, 0.0),
-        },
-        Vertex {
-            position: Vec3::new(0.0, 0.75, 0.0),
-            color: Vec3::new(0.0, 0.0, 1.0),
-        },
-    ];
-
-    let contents_bytes = unsafe { any_as_u8_slice(&vertices) };
-
-    let buffer_descriptor = wgpu::util::BufferInitDescriptor {
-        label: Some("Triangle vertex buffer"),
-        contents: contents_bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    };
-
-    let buffer = device.create_buffer_init(&buffer_descriptor);
-
-    return buffer;
-}
-
 pub fn make_quad(device: &wgpu::Device) -> Mesh {
     // Use mesh to avoid Vertexes duplicates (quad has one adjacent side- 2 vertices) with the 2 triangles composing it
     let vertices: [Vertex; 4] = [
         Vertex {
             position: Vec3::new(-0.5, -0.5, 0.0),
-            color: Vec3::new(1.0, 0.0, 0.0),
+            tex_coord: [0.0, 0.0], // bottom-left
         },
         Vertex {
             position: Vec3::new(0.5, -0.5, 0.0),
-            color: Vec3::new(0.0, 0.0, 1.0),
+            tex_coord: [1.0, 0.0], // bottom-right
         },
         Vertex {
             position: Vec3::new(-0.5, 0.5, 0.0),
-            color: Vec3::new(0.0, 1.0, 0.0),
+            tex_coord: [0.0, 1.0], // top-left
         },
         Vertex {
             position: Vec3::new(0.5, 0.5, 0.0),
-            color: Vec3::new(0.0, 0.0, 1.0),
+            tex_coord: [1.0, 1.0], // top-right
         },
     ];
     let indices = [0, 1, 2, 2, 1, 3]; // drawing order of each index (counter-clockwise)
