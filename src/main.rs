@@ -1,13 +1,15 @@
-use env_logger::builder;
+use cgmath::prelude::*;
 use glfw::{Action, Context, Key, Window, fail_on_errors};
-use wgpu::util::DeviceExt;
-
+use wgpu::util::{BufferInitDescriptor, DeviceExt};
+use wgpu::wgc::instance;
 mod controls;
 mod renderer_backend;
 
 use crate::controls::camera_controller::CameraController;
 use crate::renderer_backend::bind_group_layout;
 use crate::renderer_backend::camera::{Camera, CameraUniform};
+use crate::renderer_backend::instance::Instance;
+use crate::renderer_backend::instance::Instance as CustomInstance;
 use crate::renderer_backend::material::Material;
 use crate::renderer_backend::mesh_builder::{self, Mesh};
 use crate::renderer_backend::pipeline_builder::PipelineBuilder;
@@ -27,7 +29,9 @@ struct State<'a> {
     camera_buffer: wgpu::Buffer,
     camera_uniform: CameraUniform,
     camera_controller: CameraController,
-    camera_bind_group: wgpu::BindGroup,
+    camera_bind_group: wgpu::BindGroup, // TODO: Camera class with all the functionality
+    instances: Vec<CustomInstance>,
+    instance_buffer: wgpu::Buffer,
 }
 
 impl<'a> State<'a> {
@@ -137,6 +141,44 @@ impl<'a> State<'a> {
             label: Some("camera_bind_group"),
         });
 
+        // Instances
+        const NUM_INSTANCES_PER_ROW: u32 = 10;
+        const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
+            NUM_INSTANCES_PER_ROW as f32 * 0.5,
+            0.0,
+            NUM_INSTANCES_PER_ROW as f32 * 0.5,
+        );
+        let instances = (0..NUM_INSTANCES_PER_ROW)
+            .flat_map(|z| {
+                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                    let position = cgmath::Vector3 {
+                        x: x as f32,
+                        y: 0.0,
+                        z: z as f32,
+                    } - INSTANCE_DISPLACEMENT;
+                    let rotation = if position.is_zero() {
+                        // this is needed so an object at (0, 0, 0) won't get scaled to zero
+                        // as Quaternions can affect scale if they're not created correctly
+                        cgmath::Quaternion::from_axis_angle(
+                            cgmath::Vector3::unit_z(),
+                            cgmath::Deg(0.0),
+                        )
+                    } else {
+                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                    };
+
+                    CustomInstance { position, rotation }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         // build the pipeline, setting the shader module, pixel format and buffer layouts
         let render_pipeline: wgpu::RenderPipeline;
         {
@@ -144,6 +186,7 @@ impl<'a> State<'a> {
             builder.set_shader_module("shaders/shader.wgsl", "vs_main", "fs_main");
             builder.set_pixel_format(config.format);
             builder.add_buffer_layout(mesh_builder::Vertex::get_layout());
+            builder.add_buffer_layout(CustomInstance::get_layout());
             builder.add_bind_group_layout(&material_bind_group_layout);
             builder.add_bind_group_layout(&camera_bind_group_layout);
             render_pipeline = builder.build_pipeline("Render Pipeline");
@@ -174,6 +217,8 @@ impl<'a> State<'a> {
             camera_buffer: camera_buffer,
             camera_controller: camera_controller,
             camera_bind_group: camera_bind_group,
+            instances: instances,
+            instance_buffer: instance_buffer,
         }
     }
 
@@ -223,9 +268,10 @@ impl<'a> State<'a> {
             render_pass.set_bind_group(0, &self.material.bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass
                 .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            render_pass.draw_indexed(0..6, 0, 0..1);
+            render_pass.draw_indexed(0..6, 0, 0..self.instances.len() as _);
             //render_pass.draw(0..6, 0..1); // only if not using index optimization
         }
 
