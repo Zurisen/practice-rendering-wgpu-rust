@@ -1,4 +1,5 @@
 use crate::renderer_backend::{
+    material::{self, Material},
     mesh_builder::{self, Mesh, Vertex},
     pipeline_builder,
 };
@@ -11,6 +12,7 @@ pub struct State<'a> {
     pub config: wgpu::SurfaceConfiguration,
     pub render_pipeline: wgpu::RenderPipeline,
     pub mesh: Mesh,
+    pub material: Material,
 }
 
 impl<'a> State<'a> {
@@ -64,7 +66,8 @@ impl<'a> State<'a> {
         surface.configure(&device, &config);
         // ------------------------------------ //
 
-        let mesh = mesh_builder::make_mesh(&device);
+        let mesh = mesh_builder::create_mesh(&device);
+        let material = Material::new(&device, &queue, "textures/texture_diamond.jpg");
 
         // Create Render Pipeline
         let render_pipeline: wgpu::RenderPipeline;
@@ -77,6 +80,7 @@ impl<'a> State<'a> {
                 config.format,
             );
             pipeline_builder.add_vertex_buffer_layout(Vertex::desc());
+            pipeline_builder.add_bind_group_layout(&material.bind_group_layout);
             render_pipeline = pipeline_builder.build_pipeline("Render Pipeline");
         }
 
@@ -88,6 +92,7 @@ impl<'a> State<'a> {
             config,
             render_pipeline,
             mesh,
+            material,
         }
     }
 
@@ -121,6 +126,7 @@ impl<'a> State<'a> {
             },
             depth_slice: None,
         };
+
         let render_pass_descriptor = wgpu::RenderPassDescriptor {
             label: Some("Render Pass"),
             color_attachments: &[Some(color_attachment)],
@@ -135,6 +141,7 @@ impl<'a> State<'a> {
             render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
             render_pass
                 .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.set_bind_group(0, &self.material.bind_group, &[]);
             render_pass.draw_indexed(0..6, 0, 0..1);
         }
 

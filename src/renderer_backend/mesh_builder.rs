@@ -1,13 +1,15 @@
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 use wgpu::util::DeviceExt;
 
 #[repr(C)]
 pub struct Vertex {
     position: Vec3,
+    texture_coords: Vec2,
 }
 impl Vertex {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRIBUTES: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
+        const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -26,20 +28,24 @@ unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
         ::core::slice::from_raw_parts((p as *const T) as *const u8, ::core::mem::size_of::<T>())
     }
 }
-pub fn make_mesh(device: &wgpu::Device) -> Mesh {
+pub fn create_mesh(device: &wgpu::Device) -> Mesh {
     // Use mesh to avoid Vertexes duplicates (quad has one adjacent side- 2 vertices) with the 2 triangles composing it
     let vertices: [Vertex; 4] = [
         Vertex {
             position: Vec3::new(-0.5, -0.5, 0.0),
+            texture_coords: Vec2::new(0.0, 1.0), // Bottom-left (UV coordinates are flipped vertically)
         },
         Vertex {
             position: Vec3::new(0.5, -0.5, 0.0),
+            texture_coords: Vec2::new(1.0, 1.0), // Bottom-right
         },
         Vertex {
             position: Vec3::new(-0.5, 0.5, 0.0),
+            texture_coords: Vec2::new(0.0, 0.0), // Top-left
         },
         Vertex {
             position: Vec3::new(0.5, 0.5, 0.0),
+            texture_coords: Vec2::new(1.0, 0.0), // Top-right
         },
     ];
     let indices = [0, 1, 2, 2, 1, 3]; // drawing order of each index (counter-clockwise)

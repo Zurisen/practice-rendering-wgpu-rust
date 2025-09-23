@@ -2,8 +2,8 @@ use glfw::{Context, fail_on_errors};
 mod renderer_backend;
 use renderer_backend::state::State;
 
-const WIDTH: u32 = 1920;
-const HEIGHT: u32 = 1080;
+const WIDTH: u32 = 1000;
+const HEIGHT: u32 = 1000;
 async fn run_async() {
     let mut glfw = glfw::init(fail_on_errors!()).unwrap();
     let (mut window, events) = glfw
