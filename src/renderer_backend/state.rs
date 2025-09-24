@@ -1,4 +1,10 @@
+use cgmath::Rotation3;
+use renderer_backend::instance::Instance;
+use wgpu::util::BufferInitDescriptor;
+use wgpu::util::DeviceExt;
+
 use crate::renderer_backend::{
+    self,
     material::{self, Material},
     mesh_builder::{self, Mesh, Vertex},
     pipeline_builder,
@@ -13,6 +19,8 @@ pub struct State<'a> {
     pub render_pipeline: wgpu::RenderPipeline,
     pub mesh: Mesh,
     pub material: Material,
+    pub instances: Vec<Instance>,
+    pub instances_buffer: wgpu::Buffer,
 }
 
 impl<'a> State<'a> {
@@ -66,8 +74,44 @@ impl<'a> State<'a> {
         surface.configure(&device, &config);
         // ------------------------------------ //
 
-        let mesh = mesh_builder::create_mesh(&device);
+        let mesh_size: f32 = 0.1;
+        let mesh = mesh_builder::create_mesh(&device, &mesh_size);
         let material = Material::new(&device, &queue, "textures/texture_diamond.jpg");
+
+        // Create Instances of the mesh
+        const NUM_INSTANCES: u16 = 8;
+
+        let mut init_position = -mesh_size * (NUM_INSTANCES - 1) as f32;
+        let instances = (0..NUM_INSTANCES)
+            .map(|i| {
+                let position = cgmath::Vector3 {
+                    x: init_position,
+                    y: 0.0,
+                    z: 0.0,
+                };
+                let rotation = cgmath::Quaternion::from_axis_angle(
+                    cgmath::Vector3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 1.0,
+                    },
+                    cgmath::Deg(30.0 * (i as f32)),
+                );
+                init_position = init_position + 2.0 * mesh_size;
+                Instance { position, rotation }
+            })
+            .collect::<Vec<_>>();
+
+        let instances_raw = instances
+            .iter()
+            .map(|inst| inst.to_raw())
+            .collect::<Vec<_>>();
+
+        let instances_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Instances Buffer"),
+            contents: bytemuck::cast_slice(&instances_raw),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
         // Create Render Pipeline
         let render_pipeline: wgpu::RenderPipeline;
@@ -81,6 +125,7 @@ impl<'a> State<'a> {
             );
             pipeline_builder.add_vertex_buffer_layout(Vertex::desc());
             pipeline_builder.add_bind_group_layout(&material.bind_group_layout);
+            pipeline_builder.add_vertex_buffer_layout(Instance::desc());
             render_pipeline = pipeline_builder.build_pipeline("Render Pipeline");
         }
 
@@ -93,6 +138,8 @@ impl<'a> State<'a> {
             render_pipeline,
             mesh,
             material,
+            instances,
+            instances_buffer,
         }
     }
 
@@ -141,8 +188,13 @@ impl<'a> State<'a> {
             render_pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
             render_pass
                 .set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));
             render_pass.set_bind_group(0, &self.material.bind_group, &[]);
-            render_pass.draw_indexed(0..6, 0, 0..1);
+            render_pass.draw_indexed(
+                0..self.mesh.num_indices as u32,
+                0,
+                0..self.instances.len() as u32,
+            );
         }
 
         self.queue.submit(std::iter::once(command_encoder.finish()));

@@ -1925,6 +1925,7 @@ name = "wgpu-render-practice2"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "cgmath",
  "env_logger",
  "glam",
